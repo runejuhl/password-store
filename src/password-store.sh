@@ -291,8 +291,8 @@ cmd_usage() {
 	        Insert new password. Optionally, echo the password back to the console
 	        during entry. Or, optionally, the entry may be multiline. Prompt before
 	        overwriting existing password unless forced.
-	    $PROGRAM edit pass-name
-	        Insert a new password or edit an existing password using ${EDITOR:-vi}.
+			$PROGRAM edit [--force,-f] pass-name
+					Insert a new password or edit an existing password using ${EDITOR:-vi}.
 	    $PROGRAM generate [--no-symbols,-n] [--clip,-c] [--in-place,-i | --force,-f] pass-name [pass-length]
 	        Generate a new password of pass-length (or $GENERATED_LENGTH if unspecified) with optionally no symbols.
 	        Optionally put it on the clipboard and clear board after $CLIP_TIME seconds.
@@ -481,7 +481,16 @@ cmd_insert() {
 }
 
 cmd_edit() {
-	[[ $# -ne 1 ]] && die "Usage: $PROGRAM $COMMAND pass-name"
+	local opts
+	local -i force=0
+	opts="$($GETOPT -o f -l force -n "$PROGRAM" -- "$@")"
+	local -i err=$?
+	eval set -- "$opts"
+	while true; do case $1 in
+		-f|--force) force=1; shift ;;
+		--) shift; break ;;
+	esac done
+	[[ $err -ne 0 ]] || [[ $# -ne 1 ]] && die "Usage: $PROGRAM $COMMAND [--force,-f] pass-name"
 
 	local path="${1%/}"
 	check_sneaky_paths "$path"
@@ -494,13 +503,15 @@ cmd_edit() {
 	local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}.txt"
 
 	local action="Add"
-	if [[ -f $passfile ]]; then
+	if (( ! force )) && [[ -f "$passfile" ]]; then
 		$GPG -d -o "$tmp_file" "${GPG_OPTS[@]}" "$passfile" || exit 1
 		action="Edit"
 	fi
 	${EDITOR:-vi} "$tmp_file"
 	[[ -f $tmp_file ]] || die "New password not saved."
-	$GPG -d -o - "${GPG_OPTS[@]}" "$passfile" 2>/dev/null | diff - "$tmp_file" &>/dev/null && die "Password unchanged."
+	(( ! force )) && \
+		$GPG -d -o - "${GPG_OPTS[@]}" "$passfile" 2>/dev/null | diff - "$tmp_file" &>/dev/null && \
+		die "Password unchanged."
 	while ! $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$passfile" "${GPG_OPTS[@]}" "$tmp_file"; do
 		yesno "GPG encryption failed. Would you like to try again?"
 	done
